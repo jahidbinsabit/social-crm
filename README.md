@@ -140,7 +140,78 @@ php-curl php-zip php-redis php-intl php-gd
 
 ---
 
-## 🚀 Installation
+## 💻 Local Development Setup (Localhost)
+
+If you want to run or test the project on your personal computer (Windows/Mac/Linux) without deploying to a live server:
+
+### 1. Clone & Setup Files
+```bash
+git clone https://github.com/jahidbinsabit/social-crm.git
+cd social-crm
+cp .env.example .env
+```
+
+### 2. Install Dependencies
+```bash
+composer install
+npm install
+npm run build
+```
+
+### 3. Database & App Setup
+Make sure your local MySQL and Redis are running. Update your `.env` to match your local setup:
+```text
+DB_CONNECTION=mysql
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_DATABASE=social_crm
+DB_USERNAME=root
+DB_PASSWORD=
+
+REDIS_HOST=127.0.0.1
+```
+Then, generate your app key, migrate, and link storage:
+```bash
+php artisan key:generate
+php artisan migrate:fresh --seed
+php artisan storage:link
+```
+
+### 4. Run Laravel & Queue (Terminal 1)
+Since `concurrently` is configured, you can run Laravel, the queue worker, pail, and Vite simultaneously:
+```bash
+composer dev
+# Or run individually: `php artisan serve --port=8001`, `php artisan queue:listen`
+# Note: Ensure APP_URL in .env matches the serve port (http://localhost:8001).
+```
+
+### 5. Run WebSockets & Engines
+
+**Start Laravel Reverb (Terminal 2):**
+```bash
+php artisan reverb:start
+```
+
+**Start Node.js WhatsApp Engine (Terminal 3):**
+```bash
+cd services/whatsapp-engine
+npm install
+node index.js
+```
+
+**Start Python Telegram Engine (Terminal 4):**
+```bash
+cd services/telegram-engine
+pip install -r requirements.txt
+python main.py
+```
+
+Now open `http://localhost:8001` in your browser and log in using the default Admin credentials.
+
+---
+
+
+## 🚀 Server Installation (Production/VPS)
 
 ### 1. Clone the Repository
 
@@ -551,7 +622,6 @@ npm run build
 - 💼 **LinkedIn:** [linkedin.com/in/jbsabit](https://www.linkedin.com/in/jbsabit)
 - 🐙 **GitHub:** [github.com/jahidbinsabit](https://github.com/jahidbinsabit)
 - 📧 **Email:** [mail@jbsabit.com](mailto:mail@jbsabit.com)
-- 💬 **WhatsApp:** [+8801939925649](https://wa.me/8801939925649)
 - ✈️ **Telegram:** [@jahidbinsabit](https://t.me/jahidbinsabit)
 
 ---
