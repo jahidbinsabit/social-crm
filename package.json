@@ -1,0 +1,21 @@
+{
+    "$schema": "https://www.schemastore.org/package.json",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "build": "vite build && npm run copy-vendors",
+        "copy-vendors": "mkdir -p public/js/vendor && cp node_modules/pusher-js/dist/web/pusher.min.js public/js/vendor/pusher.js && cp node_modules/laravel-echo/dist/echo.iife.js public/js/vendor/echo.js",
+        "dev": "vite"
+    },
+    "devDependencies": {
+        "@tailwindcss/vite": "^4.0.0",
+        "concurrently": "^9.0.1",
+        "laravel-vite-plugin": "^3.1",
+        "tailwindcss": "^4.0.0",
+        "vite": "^8.0.0"
+    },
+    "dependencies": {
+        "laravel-echo": "^1.16.1",
+        "pusher-js": "^8.4.0"
+    }
+}

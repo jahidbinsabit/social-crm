@@ -1,0 +1,64 @@
+# ─────────────────────────────────────────────
+# Social CRM — Git Ignore Rules
+# ─────────────────────────────────────────────
+
+# ─── Environment & Secrets ──────────────────
+.env
+.env.backup
+.env.production
+.env.staging
+
+# ─── PHP / Composer ─────────────────────────
+/vendor
+composer.phar
+*.log
+
+# ─── Node.js / Frontend ─────────────────────
+/node_modules
+/public/build
+/public/hot
+/public/fonts-manifest.dev.json
+
+# ─── Laravel ────────────────────────────────
+/storage/*.key
+/storage/pail
+/public/storage
+/bootstrap/cache/*.php
+
+# ─── WhatsApp Engine ────────────────────────
+/services/whatsapp-engine/node_modules
+/services/whatsapp-engine/sessions/*
+!/services/whatsapp-engine/sessions/.gitkeep
+
+# ─── Telegram Engine ────────────────────────
+/services/telegram-engine/venv
+/services/telegram-engine/__pycache__
+/services/telegram-engine/sessions/*
+!/services/telegram-engine/sessions/.gitkeep
+*.pyc
+
+# ─── IDE & Editor ───────────────────────────
+/.idea
+/.vscode
+/.cursor
+/.zed
+/.nova
+/.codex
+/.phpactor.json
+.editorconfig
+
+# ─── Testing ────────────────────────────────
+.phpunit.result.cache
+/.phpunit.cache
+/coverage
+
+# ─── OS Files ───────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ─── Misc ───────────────────────────────────
+/auth.json
+_ide_helper.php
+Homestead.json
+Homestead.yaml
+npm-debug.log*
