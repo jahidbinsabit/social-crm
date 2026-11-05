@@ -19,6 +19,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'staff' => \App\Http\Middleware\StaffMiddleware::class,
             'active' => \App\Http\Middleware\CheckUserActive::class,
             'internal' => \App\Http\Middleware\InternalApiMiddleware::class,
+            'not.installed' => \App\Http\Middleware\EnsureNotInstalled::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

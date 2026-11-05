@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\InstallController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\MediaController;
 use App\Http\Controllers\Admin\AdminDashboardController;
@@ -13,6 +14,29 @@ use App\Http\Controllers\Staff\StaffChannelController;
 use App\Http\Controllers\Staff\StaffDashboardController;
 use App\Http\Controllers\Staff\StaffSettingsController;
 use Illuminate\Support\Facades\Route;
+
+// ─── Web installer ────────────────────────────────────────────────────
+// Public by necessity (it runs before any account exists), but every
+// step sits behind `not.installed`: the moment the app counts as
+// installed (lock file, or APP_KEY + a user row in the database) the
+// whole wizard redirects to /login and can never run again.
+Route::prefix('install')->name('install.')->middleware(['not.installed', 'throttle:20,1'])->group(function () {
+    Route::get('/', [InstallController::class, 'requirements'])->name('requirements');
+    Route::post('/requirements', [InstallController::class, 'requirementsNext'])->name('requirements.next');
+    Route::get('/database', [InstallController::class, 'database'])->name('database');
+    Route::post('/database', [InstallController::class, 'databaseNext'])->name('database.next');
+    Route::get('/keys', [InstallController::class, 'keys'])->name('keys');
+    Route::post('/keys', [InstallController::class, 'keysNext'])->name('keys.next');
+    Route::get('/admin', [InstallController::class, 'admin'])->name('admin');
+    Route::post('/admin', [InstallController::class, 'adminNext'])->name('admin.next');
+    Route::get('/review', [InstallController::class, 'review'])->name('review');
+    Route::post('/finish', [InstallController::class, 'finish'])->name('finish');
+});
+
+// The done page must stay reachable AFTER the install completes (when
+// `not.installed` would bounce it to /login), so it lives outside the
+// gate — the controller itself sends unfinished visitors back to step 1.
+Route::get('/install/done', [InstallController::class, 'done'])->middleware('throttle:20,1')->name('install.done');
 
 Route::get('/login', [LoginController::class, 'showLoginForm'])->name('login');
 Route::post('/login', [LoginController::class, 'login'])->middleware('throttle:10,1');
@@ -40,12 +64,12 @@ Route::prefix('admin')->middleware(['admin', 'active'])->group(function () {
     Route::post('/assign/auto', [AssignController::class, 'autoAssign'])->name('admin.assign.auto');
     Route::get('/assign/staff/{staff}/accounts', [AssignController::class, 'staffAccounts'])->name('admin.assign.staff-accounts');
     Route::get('/sessions', [SessionController::class, 'index'])->name('admin.sessions');
-    Route::post('/sessions/wa/start', [SessionController::class, 'waStartSession'])->name('admin.sessions.wa.start');
-    Route::post('/sessions/wa/pair', [SessionController::class, 'waStartPairing'])->name('admin.sessions.wa.pair');
+    Route::post('/sessions/wa/start', [SessionController::class, 'waStartSession'])->middleware('throttle:5,1')->name('admin.sessions.wa.start');
+    Route::post('/sessions/wa/pair', [SessionController::class, 'waStartPairing'])->middleware('throttle:5,1')->name('admin.sessions.wa.pair');
     Route::get('/sessions/wa/qr/{accountId}', [SessionController::class, 'waGetQr'])->name('admin.sessions.wa.qr');
     Route::get('/sessions/wa/pairing-status', [SessionController::class, 'waCheckPairing'])->name('admin.sessions.wa.pairing-status');
-    Route::post('/sessions/tg/otp', [SessionController::class, 'tgRequestOtp'])->name('admin.sessions.tg.otp');
-    Route::post('/sessions/tg/verify', [SessionController::class, 'tgVerifyOtp'])->name('admin.sessions.tg.verify');
+    Route::post('/sessions/tg/otp', [SessionController::class, 'tgRequestOtp'])->middleware('throttle:5,1')->name('admin.sessions.tg.otp');
+    Route::post('/sessions/tg/verify', [SessionController::class, 'tgVerifyOtp'])->middleware('throttle:5,1')->name('admin.sessions.tg.verify');
     Route::post('/sessions/{account}/disconnect', [SessionController::class, 'disconnectAccount'])->name('admin.sessions.disconnect');
     Route::delete('/sessions/{account}', [SessionController::class, 'deleteAccount'])->name('admin.sessions.delete');
     Route::post('/sessions/sync-status', [SessionController::class, 'syncStatus'])->name('admin.sessions.sync');
@@ -66,5 +90,5 @@ Route::prefix('staff')->middleware(['staff', 'active'])->group(function () {
     Route::get('/accounts/{account}/chats/{client}/messages', [StaffDashboardController::class, 'getClientMessages']);
     Route::post('/accounts/{account}/chats/{client}/send', [StaffDashboardController::class, 'sendMessage']);
     Route::get('/change-password', [StaffSettingsController::class, 'showChangePasswordForm'])->name('staff.changePassword');
-    Route::post('/change-password', [StaffSettingsController::class, 'changePassword'])->name('staff.changePassword.post');
+    Route::post('/change-password', [StaffSettingsController::class, 'changePassword'])->middleware('throttle:10,1')->name('staff.changePassword.post');
 });
