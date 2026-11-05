@@ -18,10 +18,25 @@ class Account extends Model
         'last_reset_date',
     ];
 
+    /**
+     * Attributes that must never be serialized (arrays, JSON, broadcasts).
+     * session_data holds live WhatsApp/Telegram session credentials.
+     *
+     * @var array<int, string>
+     */
+    protected $hidden = [
+        'session_data',
+    ];
+
     protected function casts(): array
     {
         return [
             'last_reset_date' => 'date',
+            // Encrypted at rest: a database leak must not hand over live
+            // WA/TG sessions. NOTE for deploy: values written before this
+            // cast existed are plaintext and will not decrypt — accounts
+            // need a one-off re-encrypt (or reconnect) when this ships.
+            'session_data' => 'encrypted',
         ];
     }
 

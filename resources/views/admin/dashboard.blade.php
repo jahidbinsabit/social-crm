@@ -68,7 +68,7 @@
         console.log('[Admin Realtime] Echo ready (attempt ' + attempts + ')');
 
         // Admin listens on the admin-events channel (broadcast by NewMessageReceived)
-        const ch = window.Echo.channel('admin-events');
+        const ch = window.Echo.private('admin-events');
 
         ch.subscribed(() => {
             console.log('[Admin Realtime] ✅ Subscribed to admin-events');
@@ -99,11 +99,11 @@
             <span style="font-size:20px;">${platformIcon}</span>
             <div style="flex:1;min-width:0;">
                 <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
-                    <span style="font-size:13px;font-weight:600;">${identifier}</span>
+                    <span style="font-size:13px;font-weight:600;">${window.escHtml(identifier)}</span>
                     <span style="font-size:11px;color:var(--text-secondary);">${timeAgo}</span>
                 </div>
-                <p style="font-size:13px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${body}</p>
-                <span style="font-size:11px;color:var(--text-secondary);">via ${accountName}</span>
+                <p style="font-size:13px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${window.escHtml(body)}</p>
+                <span style="font-size:11px;color:var(--text-secondary);">via ${window.escHtml(accountName)}</span>
             </div>
             <span style="width:8px;height:8px;border-radius:50%;background-color:var(--danger);flex-shrink:0;margin-top:4px;"></span>
         `;

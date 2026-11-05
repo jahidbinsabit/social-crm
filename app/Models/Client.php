@@ -10,6 +10,7 @@ class Client extends Model
 {
     protected $fillable = [
         'campaign_id',
+        'account_id',
         'platform',
         'identifier',
         'display_name',
@@ -21,6 +22,12 @@ class Client extends Model
     public function campaign(): BelongsTo
     {
         return $this->belongsTo(Campaign::class);
+    }
+
+    /** The account this conversation belongs to (audit #13). */
+    public function account(): BelongsTo
+    {
+        return $this->belongsTo(Account::class);
     }
 
     public function assignedAccount(): BelongsTo

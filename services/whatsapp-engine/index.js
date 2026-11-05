@@ -12,6 +12,7 @@ import pino from 'pino';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { mkdirSync } from 'fs';
+import { timingSafeEqual } from 'crypto';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -21,10 +22,41 @@ const sessions = new Map();
 const app = express();
 // Media travels as base64 in the JSON body, so the default 100kb limit is far
 // too small.
-app.use(express.json({ limit: '80mb' }));
+app.use(express.json({ limit: '25mb' }));
+
+// ── Internal API auth ─────────────────────────────────────────────────────
+// Every route except the GET / health check requires the shared secret in
+// the X-Internal-Secret header (same value as Laravel's INTERNAL_API_SECRET).
+// If the secret is not configured the engine refuses protected calls (503)
+// instead of running open.
+app.use((req, res, next) => {
+  if (req.method === 'GET' && req.path === '/') return next();
+  const expected = process.env.INTERNAL_API_SECRET || '';
+  if (!expected) {
+    return res.status(503).json({ error: 'INTERNAL_API_SECRET not configured on engine' });
+  }
+  const provided = req.get('X-Internal-Secret') || '';
+  const a = Buffer.from(provided);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !timingSafeEqual(a, b)) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  return next();
+});
+
+// #32: accountId must be a plain numeric id — anything else (../, slashes,
+// dots) is rejected before it can reach the filesystem session path.
+const ACCOUNT_ID_RE = /^[0-9]+$/;
+function requireValidAccountId(res, accountId) {
+  if (accountId === undefined || accountId === null || !ACCOUNT_ID_RE.test(String(accountId))) {
+    res.status(400).json({ error: 'Invalid accountId' });
+    return false;
+  }
+  return true;
+}
 
 const LARAVEL_URL = process.env.LARAVEL_URL || 'http://127.0.0.1:8000';
-const INTERNAL_SECRET = process.env.INTERNAL_API_SECRET || 'crm-internal-secret-2024';
+const INTERNAL_SECRET = process.env.INTERNAL_API_SECRET || '';
 const PORT = process.env.PORT || 3001;
 const LARAVEL_USE_HTTPS = LARAVEL_URL.startsWith('https:');
 
@@ -46,6 +78,10 @@ async function notifyLaravel(accountId, data) {
       payload = {
         accountId: String(accountId),
         from: data.from,
+        displayName: data.displayName || null,
+        senderId: data.senderId ?? null,
+        phone: data.phone ?? null,
+        externalId: data.externalId || data.messageId || null,
         body: data.body,
         timestamp: data.timestamp,
         messageType: data.messageType || 'text',
@@ -58,7 +94,13 @@ async function notifyLaravel(accountId, data) {
       payload = { accountId: String(accountId) };
     } else {
       endpoint = '/api/internal/wa-event';
-      payload = { accountId: String(accountId), event: data.event };
+      payload = {
+        accountId: String(accountId),
+        event: data.event,
+        code: data.code ?? null,
+        message: data.message ?? null,
+        status: data.status ?? null,
+      };
     }
 
     await axios.post(`${LARAVEL_URL}${endpoint}`, payload, {
@@ -158,7 +200,11 @@ async function extractIncoming(msg, socket) {
 }
 
 async function initSession(accountId, phoneNumber, mode = 'qr', retryCount = 0) {
-  const authPath = join(__dirname, 'sessions', accountId);
+  if (!ACCOUNT_ID_RE.test(String(accountId))) {
+    console.error(`[init] Refusing session for invalid accountId: ${accountId}`);
+    return;
+  }
+  const authPath = join(__dirname, 'sessions', String(accountId));
   mkdirSync(authPath, { recursive: true });
   const { state, saveCreds } = await useMultiFileAuthState(authPath);
 
@@ -329,6 +375,9 @@ async function initSession(accountId, phoneNumber, mode = 'qr', retryCount = 0) 
       await notifyLaravel(accountId, {
         event: 'incoming',
         from: remoteJid,
+        externalId: msg.key?.id || null,
+        senderId: remoteJid.split('@')[0] || null,
+        phone: remoteJid.split('@')[0] || null,
         displayName: pushName,
         timestamp: msg.messageTimestamp
           ? new Date(msg.messageTimestamp * 1000).toISOString()
@@ -351,6 +400,7 @@ async function initSession(accountId, phoneNumber, mode = 'qr', retryCount = 0) 
 app.post('/session/start', (req, res) => {
   const { accountId, phoneNumber, mode = 'qr' } = req.body;
 
+  if (!requireValidAccountId(res, accountId)) return;
   if (!accountId || !phoneNumber) {
     return res.status(400).json({ error: 'accountId and phoneNumber are required' });
   }
@@ -372,6 +422,7 @@ app.post('/session/start', (req, res) => {
 // GET /session/status/:accountId
 app.get('/session/status/:accountId', (req, res) => {
   const { accountId } = req.params;
+  if (!requireValidAccountId(res, accountId)) return;
   const session = sessions.get(accountId);
   res.json({
     accountId,
@@ -386,6 +437,7 @@ app.get('/session/status/:accountId', (req, res) => {
 // GET /session/qr/:accountId
 app.get('/session/qr/:accountId', async (req, res) => {
   const { accountId } = req.params;
+  if (!requireValidAccountId(res, accountId)) return;
   const session = sessions.get(accountId);
 
   if (!session) {
@@ -410,6 +462,7 @@ app.get('/session/qr/:accountId', async (req, res) => {
 app.post('/session/disconnect', (req, res) => {
   const { accountId } = req.body;
 
+  if (!requireValidAccountId(res, accountId)) return;
   if (!accountId) {
     return res.status(400).json({ error: 'accountId is required' });
   }
@@ -432,6 +485,7 @@ app.post('/session/disconnect', (req, res) => {
 app.post('/message/send', async (req, res) => {
   const { accountId, jid, text, media, mediaMime, mediaName, messageType } = req.body;
 
+  if (!requireValidAccountId(res, accountId)) return;
   if (!accountId || !jid) {
     return res.status(400).json({ error: 'accountId and jid are required' });
   }
@@ -564,8 +618,8 @@ setInterval(() => {
   }
 }, 2 * 60 * 1000); // Check every 2 minutes
 
-app.listen(PORT, () => {
-  console.log(`WhatsApp engine listening on port ${PORT}`);
+app.listen(PORT, '127.0.0.1', () => {
+  console.log(`WhatsApp engine listening on 127.0.0.1:${PORT}`);
   // Defer so the first QR/event handlers attach immediately.
   setTimeout(restoreActiveSessions, 2000);
 });

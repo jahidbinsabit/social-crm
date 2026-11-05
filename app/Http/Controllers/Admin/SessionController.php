@@ -6,9 +6,11 @@ use App\Http\Controllers\Controller;
 use App\Models\Account;
 use App\Services\TelegramService;
 use App\Services\WhatsAppService;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Session as FacadesSession;
 
 class SessionController extends Controller
@@ -134,10 +136,17 @@ class SessionController extends Controller
             }
         }
 
-        $account = Account::updateOrCreate(
-            ['platform' => 'whatsapp', 'phone_number' => $phone],
-            ['account_name' => $phone, 'status' => 'connecting']
-        );
+        try {
+            $account = Account::updateOrCreate(
+                ['platform' => 'whatsapp', 'phone_number' => $phone],
+                ['account_name' => $phone, 'status' => 'connecting']
+            );
+        } catch (QueryException $e) {
+            // Concurrent double-submit raced the (platform, phone) unique
+            // index. Friendly message instead of an unhandled 500.
+            Log::warning('WA account upsert race', ['error' => $e->getMessage()]);
+            return back()->with('error', 'An account for ' . $phone . ' already exists. Please refresh the page and try again.');
+        }
 
         try {
             $whatsapp->startSession($account->id, $phone);
@@ -152,6 +161,10 @@ class SessionController extends Controller
 
     public function waStartPairing(Request $request, WhatsAppService $whatsapp): RedirectResponse
     {
+        if ($this->otpThrottleExceeded($request, 'wa-pairing')) {
+            return back()->with('error', 'Too many pairing attempts. Please wait a few minutes and try again.');
+        }
+
         $request->validate([
             'phone_number' => 'required|string',
         ]);
@@ -175,10 +188,15 @@ class SessionController extends Controller
             }
         }
 
-        $account = Account::updateOrCreate(
-            ['platform' => 'whatsapp', 'phone_number' => $phone],
-            ['account_name' => $phone, 'status' => 'connecting']
-        );
+        try {
+            $account = Account::updateOrCreate(
+                ['platform' => 'whatsapp', 'phone_number' => $phone],
+                ['account_name' => $phone, 'status' => 'connecting']
+            );
+        } catch (QueryException $e) {
+            Log::warning('WA pairing account upsert race', ['error' => $e->getMessage()]);
+            return back()->with('error', 'An account for ' . $phone . ' already exists. Please refresh the page and try again.');
+        }
 
         try {
             $whatsapp->startPairing($account->id, $phone);
@@ -232,6 +250,10 @@ class SessionController extends Controller
 
     public function tgRequestOtp(Request $request, TelegramService $telegram): RedirectResponse
     {
+        if ($this->otpThrottleExceeded($request, 'tg-otp-request')) {
+            return back()->with('error', 'Too many OTP requests. Please wait a few minutes and try again.');
+        }
+
         $request->validate([
             'phone_number' => 'required|string',
         ]);
@@ -255,16 +277,21 @@ class SessionController extends Controller
             }
         }
 
-        $account = Account::updateOrCreate(
-            [
-                'platform' => 'telegram',
-                'phone_number' => $phone,
-            ],
-            [
-                'account_name' => $phone,
-                'status' => 'disconnected',
-            ]
-        );
+        try {
+            $account = Account::updateOrCreate(
+                [
+                    'platform' => 'telegram',
+                    'phone_number' => $phone,
+                ],
+                [
+                    'account_name' => $phone,
+                    'status' => 'disconnected',
+                ]
+            );
+        } catch (QueryException $e) {
+            Log::warning('TG account upsert race', ['error' => $e->getMessage()]);
+            return back()->with('error', 'An account for ' . $phone . ' already exists. Please refresh the page and try again.');
+        }
 
         try {
             $telegram->requestOtp($account->id, $phone);
@@ -282,6 +309,10 @@ class SessionController extends Controller
 
     public function tgVerifyOtp(Request $request, TelegramService $telegram): RedirectResponse
     {
+        if ($this->otpThrottleExceeded($request, 'tg-otp-verify')) {
+            return back()->with('error', 'Too many verification attempts. Please wait a few minutes and try again.');
+        }
+
         $request->validate([
             'code' => 'required|string',
             'phone2fa' => 'nullable|string',
@@ -346,5 +377,27 @@ class SessionController extends Controller
         $account->delete();
 
         return back()->with('success', 'Account deleted');
+    }
+
+    /**
+     * Per-admin throttle for OTP / pairing ceremonies (item #14/#27,
+     * Laravel half — routes are not where this lives, so the check is
+     * in-controller). Max 5 attempts per 5 minutes per admin per action:
+     * unthrottled OTP verify is a brute-force surface, and unthrottled
+     * OTP requests spam the target number and risk Telegram FLOOD_WAIT.
+     *
+     * Returns true when the caller is over the limit.
+     */
+    private function otpThrottleExceeded(Request $request, string $action): bool
+    {
+        $key = $action . ':' . ($request->user()?->id ?? $request->ip());
+
+        if (RateLimiter::tooManyAttempts($key, 5)) {
+            return true;
+        }
+
+        RateLimiter::hit($key, 300);
+
+        return false;
     }
 }

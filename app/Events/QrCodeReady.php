@@ -3,7 +3,6 @@
 namespace App\Events;
 
 use App\Models\Account;
-use Illuminate\Broadcasting\Channel;
 use Illuminate\Broadcasting\InteractsWithSockets;
 use Illuminate\Broadcasting\PresenceChannel;
 use Illuminate\Broadcasting\PrivateChannel;
@@ -33,7 +32,22 @@ class QrCodeReady implements ShouldBroadcastNow
     public function broadcastOn(): array
     {
         return [
-            new Channel('admin-events'),
+            new PrivateChannel('admin-events'),
+        ];
+    }
+
+    /**
+     * Get the data to broadcast.
+     *
+     * Minimal by design (unchanged payload): only the account id — the QR
+     * image itself is fetched by the admin UI over authenticated HTTP.
+     *
+     * @return array<string, mixed>
+     */
+    public function broadcastWith(): array
+    {
+        return [
+            'accountId' => $this->accountId,
         ];
     }
 }

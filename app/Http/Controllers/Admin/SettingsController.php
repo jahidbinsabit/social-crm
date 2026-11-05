@@ -13,7 +13,15 @@ class SettingsController extends Controller
     {
         $settings = SystemSettings::current();
 
-        return view('admin.settings', compact('settings'));
+        // Contract with the settings blade (cross-worker note): the view
+        // receives $proxyPasswordSet (bool) and must render the password
+        // field EMPTY with a "password is set" hint — the stored value is
+        // never sent back to the browser. The blade at audit time rendered
+        // $settings->proxy_password into the input value; with the model's
+        // new $hidden + encrypted cast that also no longer round-trips.
+        $proxyPasswordSet = !empty($settings->proxy_password);
+
+        return view('admin.settings', compact('settings', 'proxyPasswordSet'));
     }
 
     public function update(Request $request): RedirectResponse
@@ -27,6 +35,12 @@ class SettingsController extends Controller
             'proxy_username' => 'nullable|string',
             'proxy_password' => 'nullable|string',
         ]);
+
+        // An empty submission means "keep the current password" — submitting
+        // the settings form must never silently wipe a stored secret.
+        if (empty($validated['proxy_password'])) {
+            unset($validated['proxy_password']);
+        }
 
         SystemSettings::current()->update($validated);
 

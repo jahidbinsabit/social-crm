@@ -711,15 +711,15 @@
             var type = msg.message_type || 'text';
             if (type === 'text' || !msg.media_url) return '';
 
-            var url = escHtml(msg.media_url);
-            var urlAttr = escAttr(msg.media_url);
+            var url = escAttr(window.safeUrl ? window.safeUrl(msg.media_url) : msg.media_url);
+            var urlAttr = url;
             var name = escHtml(msg.media_name || 'file');
             var common = 'display:block;max-width:220px;max-height:240px;border-radius:8px;margin-bottom:6px;';
 
             if (type === 'image' || type === 'sticker') {
                 var size = type === 'sticker' ? 'max-width:100px;max-height:100px;' : '';
                 return '<img src="' + url + '" alt="' + name + '" loading="lazy" style="' + common + size +
-                    'cursor:pointer;" onclick="openLightbox(\'' + urlAttr + '\',\'image\')">';
+                    'cursor:pointer;" data-lightbox-url="' + urlAttr + '" data-lightbox-type="image">';
             }
             if (type === 'video') {
                 return '<video src="' + url + '" controls preload="metadata" style="' + common + '"></video>';
@@ -758,11 +758,24 @@
 
         window.openLightbox = function(url, type) {
             var box = document.getElementById('admin-lightbox');
-            document.getElementById('admin-lb-content').innerHTML = type === 'video'
-                ? '<video src="' + url + '" controls autoplay style="max-width:92vw;max-height:88vh;"></video>'
-                : '<img src="' + url + '" style="max-width:92vw;max-height:88vh;border-radius:6px;">';
+            var content = document.getElementById('admin-lb-content');
+            content.innerHTML = '';
+            var el = document.createElement(type === 'video' ? 'video' : 'img');
+            if (type === 'video') { el.controls = true; el.autoplay = true; }
+            el.style.cssText = type === 'video'
+                ? 'max-width:92vw;max-height:88vh;'
+                : 'max-width:92vw;max-height:88vh;border-radius:6px;';
+            el.src = window.safeUrl ? window.safeUrl(url) : url;
+            content.appendChild(el);
             box.style.display = 'flex';
         };
+
+        // Lightbox triggers carry the URL in data attributes (never inline
+        // JS-string onclick) and are handled by delegation.
+        document.addEventListener('click', function(e) {
+            var t = e.target.closest('[data-lightbox-url]');
+            if (t) window.openLightbox(t.dataset.lightboxUrl, t.dataset.lightboxType || 'image');
+        });
 
         window.closeLightbox = function() {
             document.getElementById('admin-lightbox').style.display = 'none';
@@ -852,7 +865,7 @@
                     return;
                 }
 
-                window.Echo.channel('admin-events').listen('.NewMessageReceived', function(e) {
+                window.Echo.private('admin-events').listen('.NewMessageReceived', function(e) {
                     var message = e.message;
                     if (!message) return;
 

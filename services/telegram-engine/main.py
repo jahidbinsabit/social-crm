@@ -3,6 +3,8 @@
 
 import asyncio
 import base64
+import hmac
+import re
 import io
 import mimetypes
 import os
@@ -12,7 +14,8 @@ from dotenv import load_dotenv
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from telethon import TelegramClient
 from telethon.errors import SessionPasswordNeededError, PhoneCodeInvalidError, FloodWaitError, RPCError
 from telethon.events import NewMessage
@@ -30,7 +33,7 @@ app = FastAPI(title="Telegram Engine")
 LARAVEL_URL = os.getenv("LARAVEL_URL", "http://127.0.0.1:8001")
 API_ID = int(os.getenv("API_ID", "0"))
 API_HASH = os.getenv("API_HASH", "")
-INTERNAL_SECRET = os.getenv("INTERNAL_API_SECRET", "crm-internal-secret-2024")
+INTERNAL_SECRET = os.getenv("INTERNAL_API_SECRET", "")
 PORT = int(os.getenv("PORT", 3002))
 
 if API_ID == 0 or not API_HASH or API_HASH == "your_telegram_api_hash":
@@ -88,6 +91,8 @@ async def restore_active_sessions():
             if acct.get("platform") != "telegram":
                 continue
             account_id = str(acct["id"])
+            if not valid_account_id(account_id):
+                continue
             if account_id in sessions:
                 continue
 
@@ -160,6 +165,33 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(title="Telegram Engine", lifespan=lifespan)
 
 
+# ── Internal API auth ─────────────────────────────────────────────────────
+# Every route except the GET / health check requires the shared secret in
+# the X-Internal-Secret header (same value as Laravel's INTERNAL_API_SECRET).
+# If the secret is not configured the engine refuses protected calls (503)
+# instead of running open.
+@app.middleware("http")
+async def internal_auth(request: Request, call_next):
+    if request.method == "GET" and request.url.path == "/":
+        return await call_next(request)
+    expected = os.getenv("INTERNAL_API_" + "SECRET", "") or ""
+    if not expected:
+        return JSONResponse(status_code=503, content={"status": "error", "message": "INTERNAL_API_SECRET not configured on engine"})
+    provided = request.headers.get("X-Internal-Secret", "")
+    if not hmac.compare_digest(provided, expected):
+        return JSONResponse(status_code=401, content={"status": "error", "message": "Unauthorized"})
+    return await call_next(request)
+
+
+# accountId must be a plain numeric id — anything else (../, slashes, dots)
+# is rejected before it can reach a session file path.
+ACCOUNT_ID_RE = re.compile(r"^[0-9]+$")
+
+
+def valid_account_id(value) -> bool:
+    return value is not None and ACCOUNT_ID_RE.match(str(value)) is not None
+
+
 async def notify_laravel(account_id: str, data: dict):
     async with httpx.AsyncClient(
         timeout=60.0,
@@ -182,6 +214,9 @@ async def request_otp(payload: dict):
 
     if not account_id or not phone_number:
         return {"status": "error", "message": "accountId and phoneNumber are required"}
+
+    if not valid_account_id(account_id):
+        return {"status": "error", "message": "Invalid accountId"}
 
     phone_number = phone_number.strip()
     if not phone_number.startswith("+"):
@@ -218,6 +253,9 @@ async def verify_otp(payload: dict):
 
     if not account_id or not code:
         return {"status": "error", "message": "accountId and code are required"}
+
+    if not valid_account_id(account_id):
+        return {"status": "error", "message": "Invalid accountId"}
 
     session_data = sessions.get(account_id)
     if not session_data:
@@ -414,6 +452,7 @@ def _register_message_handler(account_id: str, client: TelegramClient):
 
             payload = {
                 "accountId": str(account_id),
+                "externalId": str(event.id),
                 "from": from_identifier,
                 "senderId": sender_id,
                 "phone": phone_formatted,
@@ -484,6 +523,9 @@ async def disconnect_session(payload: dict):
     if not account_id:
         return {"status": "error", "message": "accountId is required"}
 
+    if not valid_account_id(account_id):
+        return {"status": "error", "message": "Invalid accountId"}
+
     session_data = sessions.get(account_id)
     if session_data and session_data.get("client"):
         try:
@@ -497,6 +539,8 @@ async def disconnect_session(payload: dict):
 
 @app.get("/session/status/{account_id}")
 async def session_status(account_id: str):
+    if not valid_account_id(account_id):
+        return {"accountId": account_id, "status": "error", "message": "Invalid accountId"}
     if account_id not in sessions:
         return {"accountId": account_id, "status": "not_found"}
     return {"accountId": account_id, "status": sessions[account_id]["status"]}
@@ -515,8 +559,15 @@ async def send_message(payload: dict):
     if not account_id or not username:
         return {"status": "error", "message": "accountId and username are required"}
 
+    if not valid_account_id(account_id):
+        return {"status": "error", "message": "Invalid accountId"}
+
     if not text and not media_b64:
         return {"status": "error", "message": "either text or media is required"}
+
+    # Cap media size before paying the base64 decode cost (~3/4 of b64 len).
+    if media_b64 and (len(media_b64) * 3) // 4 > 20 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Media too large (max 20MB)")
 
     session_data = sessions.get(account_id)
     if not session_data or session_data.get("status") != "active":
@@ -591,6 +642,9 @@ async def restore_session(payload: dict):
     if not account_id:
         return {"status": "error", "message": "accountId is required"}
 
+    if not valid_account_id(account_id):
+        return {"status": "error", "message": "Invalid accountId"}
+
     if account_id in sessions and sessions[account_id].get("status") == "active":
         return {"status": "already_connected"}
 
@@ -625,7 +679,7 @@ async def restore_session(payload: dict):
 if __name__ == "__main__":
     uvicorn.run(
         "main:app",
-        host="0.0.0.0",
+        host="127.0.0.1",
         port=PORT,
         reload=False,
         loop="asyncio",

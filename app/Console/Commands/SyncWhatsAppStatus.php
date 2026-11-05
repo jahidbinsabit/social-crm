@@ -28,50 +28,65 @@ class SyncWhatsAppStatus extends Command
      */
     public function handle(WhatsAppService $whatsapp, TelegramService $telegram): void
     {
-        // Sync WhatsApp sessions
+        // Poll EVERY account (#18) — including 'disconnected' ones. The old
+        // active/connecting-only filter meant a disconnected account was
+        // never polled again, so it could never recover on its own.
         Account::where('platform', 'whatsapp')
-            ->whereIn('status', ['active', 'connecting'])
             ->each(function ($account) use ($whatsapp) {
-                try {
-                    $engineStatus = $whatsapp->getStatus((string) $account->id);
-                    $dbStatus = match($engineStatus) {
-                        'active', 'connected', 'open' => 'active',
-                        'connecting', 'qr' => 'connecting',
-                        default => 'disconnected',
-                    };
-
-                    if ($account->status !== $dbStatus) {
-                        $account->update(['status' => $dbStatus]);
-                        $this->info("Account {$account->id} (WA) updated: {$account->status} → {$dbStatus}");
-                    }
-                } catch (\Throwable $e) {
-                    if ($account->status !== 'disconnected') {
-                        $account->update(['status' => 'disconnected']);
-                        $this->warn("Account {$account->id} (WA) engine unreachable — marked disconnected");
-                    }
-                }
+                $this->syncOne($account, fn() => $whatsapp->getStatus((string) $account->id), 'WA', [
+                    'active' => 'active', 'connected' => 'active', 'open' => 'active',
+                    'connecting' => 'connecting', 'qr' => 'connecting',
+                    'disconnected' => 'disconnected', 'closed' => 'disconnected',
+                    'not_connected' => 'disconnected', 'logged_out' => 'disconnected',
+                ]);
             });
 
-        // Sync Telegram sessions
         Account::where('platform', 'telegram')
-            ->whereIn('status', ['active', 'connecting'])
             ->each(function ($account) use ($telegram) {
-                try {
-                    $engineStatus = $telegram->getStatus((string) $account->id);
-                    $dbStatus = ($engineStatus === 'active') ? 'active' : 'disconnected';
-
-                    if ($account->status !== $dbStatus) {
-                        $account->update(['status' => $dbStatus]);
-                        $this->info("Account {$account->id} (TG) updated: {$account->status} → {$dbStatus}");
-                    }
-                } catch (\Throwable $e) {
-                    if ($account->status !== 'disconnected') {
-                        $account->update(['status' => 'disconnected']);
-                        $this->warn("Account {$account->id} (TG) engine unreachable — marked disconnected");
-                    }
-                }
+                $this->syncOne($account, fn() => $telegram->getStatus((string) $account->id), 'TG', [
+                    'active' => 'active', 'connected' => 'active',
+                    'disconnected' => 'disconnected', 'closed' => 'disconnected',
+                    'not_connected' => 'disconnected', 'logged_out' => 'disconnected',
+                ]);
             });
 
         $this->info('Session sync complete.');
+    }
+
+    /**
+     * Mirror one account's engine status into the DB.
+     *
+     * 'unreachable' / 'unknown' (and any unrecognised status) NEVER write
+     * 'disconnected' (#18): both engine services return the string
+     * 'unreachable' when the engine cannot be contacted, so a transient
+     * engine outage previously marked every account disconnected — and
+     * the old status filter then excluded them from all future polls.
+     */
+    private function syncOne(Account $account, callable $fetchStatus, string $label, array $statusMap): void
+    {
+        try {
+            $engineStatus = $fetchStatus();
+        } catch (\Throwable $e) {
+            $this->warn("Account {$account->id} ({$label}) status check failed — leaving status unchanged: {$e->getMessage()}");
+            return;
+        }
+
+        if ($engineStatus === 'unreachable' || $engineStatus === 'unknown' || $engineStatus === null || $engineStatus === '') {
+            $this->warn("Account {$account->id} ({$label}) engine unreachable — leaving status unchanged");
+            return;
+        }
+
+        $dbStatus = $statusMap[$engineStatus] ?? null;
+
+        if ($dbStatus === null) {
+            $this->warn("Account {$account->id} ({$label}) unrecognised engine status '{$engineStatus}' — leaving status unchanged");
+            return;
+        }
+
+        if ($account->status !== $dbStatus) {
+            $old = $account->status;
+            $account->update(['status' => $dbStatus]);
+            $this->info("Account {$account->id} ({$label}) updated: {$old} → {$dbStatus}");
+        }
     }
 }

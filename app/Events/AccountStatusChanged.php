@@ -3,7 +3,6 @@
 namespace App\Events;
 
 use App\Models\Account;
-use Illuminate\Broadcasting\Channel;
 use Illuminate\Broadcasting\InteractsWithSockets;
 use Illuminate\Broadcasting\PresenceChannel;
 use Illuminate\Broadcasting\PrivateChannel;
@@ -33,7 +32,29 @@ class AccountStatusChanged implements ShouldBroadcastNow
     public function broadcastOn(): array
     {
         return [
-            new Channel('admin-events'),
+            new PrivateChannel('admin-events'),
+        ];
+    }
+
+    /**
+     * Get the data to broadcast.
+     *
+     * Explicit whitelist: without this the public $account property is
+     * serialized in full — including the account's session_data (live
+     * WhatsApp/Telegram credentials). Only the fields the admin UI needs
+     * to update an account row are ever sent.
+     *
+     * @return array<string, mixed>
+     */
+    public function broadcastWith(): array
+    {
+        return [
+            'account' => [
+                'id' => $this->account->id,
+                'platform' => $this->account->platform,
+                'phone_number' => $this->account->phone_number,
+                'status' => $this->account->status,
+            ],
         ];
     }
 }

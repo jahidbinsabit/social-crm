@@ -22,7 +22,8 @@ return new class extends Migration
         DB::statement("UPDATE accounts SET status = 'disconnected' WHERE status = 'connecting'");
         DB::statement("ALTER TABLE accounts MODIFY status ENUM('active','restricted','disconnected') NOT NULL DEFAULT 'disconnected'");
 
-        DB::statement('DELETE FROM clients WHERE campaign_id IS NULL');
+        // PERFECT-FIX #33: destructive DELETE removed — rollback must never delete client data.
+        // (Previously deleted every inbound client on rollback.)
         DB::statement('ALTER TABLE clients MODIFY campaign_id BIGINT UNSIGNED NOT NULL');
     }
 };

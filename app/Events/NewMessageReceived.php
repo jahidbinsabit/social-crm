@@ -3,7 +3,6 @@
 namespace App\Events;
 
 use App\Models\Message;
-use Illuminate\Broadcasting\Channel;
 use Illuminate\Broadcasting\InteractsWithSockets;
 use Illuminate\Broadcasting\PresenceChannel;
 use Illuminate\Broadcasting\PrivateChannel;
@@ -44,7 +43,7 @@ class NewMessageReceived implements ShouldBroadcastNow
      */
     public function broadcastOn(): array
     {
-        $channels = [new Channel('admin-events')];
+        $channels = [new PrivateChannel('admin-events')];
 
         try {
             // Single optimized query — get all staff IDs for this account
@@ -90,10 +89,38 @@ class NewMessageReceived implements ShouldBroadcastNow
             $mediaUrl = url('/media/' . $message->media_path);
         }
 
+        // Explicit whitelist. The old $message->toArray() merged the loaded
+        // 'client' and 'account' relations — including account.session_data
+        // (live WhatsApp/Telegram credentials) — into every broadcast.
+        // Only the fields the chat UI renders are sent now.
         return [
-            'message' => array_merge($message->toArray(), [
+            'message' => [
+                'id' => $message->id,
+                'platform' => $message->platform,
+                'account_id' => $message->account_id,
+                'client_id' => $message->client_id,
+                'staff_id' => $message->staff_id,
+                'sender_type' => $message->sender_type,
+                'message_type' => $message->message_type,
+                'message_body' => $message->message_body,
+                'media_path' => $message->media_path,
+                'media_mime' => $message->media_mime,
+                'media_name' => $message->media_name,
+                'media_size' => $message->media_size,
                 'media_url' => $mediaUrl,
-            ]),
+                'is_read' => $message->is_read,
+                'created_at' => $message->created_at?->toIso8601String(),
+                'updated_at' => $message->updated_at?->toIso8601String(),
+                'client' => $message->client ? [
+                    'id' => $message->client->id,
+                    'identifier' => $message->client->identifier,
+                    'display_name' => $message->client->display_name,
+                ] : null,
+                'account' => $message->account ? [
+                    'id' => $message->account->id,
+                    'platform' => $message->account->platform,
+                ] : null,
+            ],
             'account_id' => $message->account_id,
             'client_id'  => $message->client_id,
         ];

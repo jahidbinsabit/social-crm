@@ -33,6 +33,14 @@ class AssignController extends Controller
         ]);
 
         $user = User::findOrFail($request->input("staff_id"));
+
+        // Only ACTIVE STAFF may receive assignments. Previously any user id
+        // was accepted — admin/inactive users got account_staff rows that
+        // drive media access, chat access and broadcast fan-out.
+        if (($error = $this->eligibleStaffError($user)) !== null) {
+            return response()->json(["success" => false, "message" => $error], 422);
+        }
+
         $user->accounts()->syncWithoutDetaching([$request->input("account_id")]);
 
         return response()->json(["success" => true]);
@@ -46,9 +54,31 @@ class AssignController extends Controller
         ]);
 
         $user = User::findOrFail($request->input("staff_id"));
+
+        if (($error = $this->eligibleStaffError($user)) !== null) {
+            return response()->json(["success" => false, "message" => $error], 422);
+        }
+
         $user->accounts()->detach($request->input("account_id"));
 
         return response()->json(["success" => true]);
+    }
+
+    /**
+     * Return an error message when the user may not hold assignments,
+     * or null when they are an active staff member.
+     */
+    private function eligibleStaffError(User $user): ?string
+    {
+        if ($user->role !== "staff") {
+            return "Only staff members can be assigned accounts.";
+        }
+
+        if ($user->status !== "active") {
+            return "Inactive staff members cannot be assigned accounts.";
+        }
+
+        return null;
     }
 
     public function autoAssign(Request $request): JsonResponse
@@ -80,17 +110,43 @@ class AssignController extends Controller
         }
 
         $staffCount = $staff->count();
+
+        // INCREMENTAL: only accounts with NO staff assignment at all are
+        // distributed. Existing account_staff rows are never touched — the
+        // old loop walked every account and added another staff member to
+        // each one on every run, piling up duplicate access.
+        $unassigned = $accounts->filter(
+            fn($account) => $account->staff()->doesntExist()
+        )->values();
+
+        if ($unassigned->isEmpty()) {
+            return response()->json([
+                "success" => true,
+                "message" => "All active accounts are already assigned. Nothing changed.",
+                "assigned" => 0,
+            ]);
+        }
+
+        // Balance the new accounts across staff by current workload, so the
+        // staff member with the fewest accounts gets the next one.
+        $loads = $staff->mapWithKeys(
+            fn($member) => [$member->id => $member->accounts()->count()]
+        );
+
         $assignedCount = 0;
 
-        foreach ($accounts as $index => $account) {
-            $assignedStaff = $staff[$index % $staffCount];
-            $assignedStaff->accounts()->syncWithoutDetaching([$account->id]);
+        foreach ($unassigned as $account) {
+            $targetId = $loads->sort()->keys()->first();
+            $target = $staff->firstWhere("id", $targetId);
+            $target->accounts()->syncWithoutDetaching([$account->id]);
+            $loads[$targetId]++;
             $assignedCount++;
         }
 
         return response()->json([
             "success" => true,
-            "message" => "Successfully auto-assigned {$assignedCount} account(s) across {$staffCount} staff member(s).",
+            "message" => "Successfully auto-assigned {$assignedCount} previously unassigned account(s) across {$staffCount} staff member(s). Existing assignments were left unchanged.",
+            "assigned" => $assignedCount,
         ]);
     }
 

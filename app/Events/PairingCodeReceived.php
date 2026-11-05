@@ -2,8 +2,8 @@
 
 namespace App\Events;
 
-use Illuminate\Broadcasting\Channel;
 use Illuminate\Broadcasting\InteractsWithSockets;
+use Illuminate\Broadcasting\PrivateChannel;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
@@ -19,7 +19,9 @@ class PairingCodeReceived implements ShouldBroadcastNow
 
     public function broadcastOn(): array
     {
-        return [new Channel('admin-events')];
+        // PrivateChannel: a pairing code is a live linking credential — it
+        // must only ever reach authenticated admins, never public listeners.
+        return [new PrivateChannel('admin-events')];
     }
 
     public function broadcastWith(): array

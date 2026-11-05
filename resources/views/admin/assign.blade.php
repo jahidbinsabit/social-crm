@@ -121,7 +121,7 @@ async function loadAccounts(platform) {
             return;
         }
         list.innerHTML = accounts.map(function(acc) {
-            return '<div class="account-row"><div class="info"><div class="name">' + acc.account_name + '</div><div class="phone">' + acc.phone_number + '</div></div><button class="toggle ' + (acc.assigned ? 'on' : 'off') + '" data-account="' + acc.id + '" onclick="toggleAssign(this, ' + acc.id + ')"></button></div>';
+            return '<div class="account-row"><div class="info"><div class="name">' + window.escHtml(acc.account_name) + '</div><div class="phone">' + window.escHtml(acc.phone_number) + '</div></div><button class="toggle ' + (acc.assigned ? 'on' : 'off') + '" data-account="' + acc.id + '" onclick="toggleAssign(this, ' + acc.id + ')"></button></div>';
         }).join('');
     } catch (e) {
         list.innerHTML = '<div class="empty-state">Failed to load accounts</div>';

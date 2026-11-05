@@ -8,21 +8,31 @@ use App\Models\CampaignLead;
 use App\Models\Client;
 use App\Models\SystemSetting;
 use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 
-class ProcessCampaignJob implements ShouldQueue
+class ProcessCampaignJob implements ShouldQueue, ShouldBeUnique
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public int $tries   = 1;
     public int $timeout = 120; // Just for the dispatch phase, not the sending
 
+    /** How long the uniqueness lock lives if the dispatcher dies mid-run. */
+    public int $uniqueFor = 3600;
+
     public function __construct(public int $campaignId)
     {
+    }
+
+    /** One dispatcher per campaign at a time (#8) — no double fan-out. */
+    public function uniqueId(): string
+    {
+        return 'campaign-' . $this->campaignId;
     }
 
     public function handle(): void
@@ -30,9 +40,21 @@ class ProcessCampaignJob implements ShouldQueue
         $campaign = Campaign::find($this->campaignId);
         if (!$campaign) return;
 
+        // A finished campaign is never re-dispatched by accident (#8).
+        // Next-day quota resume flips paused campaigns back to 'pending'
+        // (ResetDailyLimits) before dispatching, so it passes this guard.
+        if (in_array($campaign->status, ['completed', 'failed'], true)) {
+            return;
+        }
+
         try {
             $campaign->update(['status' => 'running']);
             $settings = SystemSetting::current();
+
+            // Clamp the delay window (#12): rand() throws ValueError when
+            // an admin saves min > max, which used to kill the campaign.
+            $minDelay = max(0, (int) $settings->min_delay_seconds);
+            $maxDelay = max($minDelay, (int) $settings->max_delay_seconds);
 
             $accountQuery = Account::where('platform', $campaign->platform)
                 ->where('status', 'active')
@@ -70,8 +92,8 @@ class ProcessCampaignJob implements ShouldQueue
                 foreach ($pendingLeads as $index => $lead) {
                     $account = $accounts[$index % $accountCount];
                     $accountDelays[$account->id] = ($accountDelays[$account->id] ?? 0) + rand(
-                        $settings->min_delay_seconds,
-                        $settings->max_delay_seconds
+                        $minDelay,
+                        $maxDelay
                     );
 
                     ProcessSingleClientJob::dispatch(
@@ -102,8 +124,8 @@ class ProcessCampaignJob implements ShouldQueue
             foreach ($pendingClients as $index => $client) {
                 $account = $accounts[$index % $accountCount];
                 $accountDelays[$account->id] = ($accountDelays[$account->id] ?? 0) + rand(
-                    $settings->min_delay_seconds,
-                    $settings->max_delay_seconds
+                    $minDelay,
+                    $maxDelay
                 );
 
                 ProcessSingleClientJob::dispatch(
@@ -124,4 +146,3 @@ class ProcessCampaignJob implements ShouldQueue
         }
     }
 }
-

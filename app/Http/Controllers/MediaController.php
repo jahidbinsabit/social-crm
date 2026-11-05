@@ -34,18 +34,25 @@ class MediaController extends Controller
             abort(401);
         }
 
-        // Authorization: staff may only view media for accounts they are assigned to
+        // Authorization: staff may only view media for accounts they are assigned to.
+        // FAIL CLOSED: previously the assignment check only ran when a Message
+        // row matched the path — orphaned files (e.g. after an account delete
+        // cascade-removed the message rows) were served to ANY staff member.
+        // Now: no matching message row means no proven right to the file.
         if ($user->role !== 'admin') {
             $message = \App\Models\Message::where('media_path', $path)->first();
-            if ($message) {
-                $hasAccess = \Illuminate\Support\Facades\DB::table('account_staff')
-                    ->where('account_id', $message->account_id)
-                    ->where('user_id', $user->id)
-                    ->exists();
 
-                if (!$hasAccess) {
-                    abort(403, 'Unauthorized access to media');
-                }
+            if (!$message) {
+                abort(403, 'Unauthorized access to media');
+            }
+
+            $hasAccess = \Illuminate\Support\Facades\DB::table('account_staff')
+                ->where('account_id', $message->account_id)
+                ->where('user_id', $user->id)
+                ->exists();
+
+            if (!$hasAccess) {
+                abort(403, 'Unauthorized access to media');
             }
         }
 
@@ -55,6 +62,11 @@ class MediaController extends Controller
 
         $mime = Storage::disk('local')->mimeType($path) ?: 'application/octet-stream';
         $size = Storage::disk('local')->size($path);
+
+        // Only images may render inline in the CRM origin. Everything else is
+        // forced to download: an uploaded .html/.svg must never execute as a
+        // page on this origin. nosniff stops browsers second-guessing the type.
+        $disposition = str_starts_with($mime, 'image/') ? 'inline' : 'attachment';
 
         return response()->stream(
             function () use ($path) {
@@ -68,7 +80,8 @@ class MediaController extends Controller
             [
                 'Content-Type'        => $mime,
                 'Content-Length'      => $size,
-                'Content-Disposition' => 'inline; filename="' . basename($path) . '"',
+                'Content-Disposition' => $disposition . '; filename="' . basename($path) . '"',
+                'X-Content-Type-Options' => 'nosniff',
                 'Cache-Control'       => 'private, max-age=86400',
                 'Accept-Ranges'       => 'bytes',
             ]

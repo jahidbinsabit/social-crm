@@ -99,10 +99,14 @@ class AccountsController extends Controller
             return $msg;
         });
 
-        Message::where('account_id', $account->id)
-            ->where('client_id', $client->id)
-            ->where('is_read', false)
-            ->update(['is_read' => true]);
+        // Mark read ONLY the messages in this fetched page — not the whole
+        // thread (unfetched pages and mid-request arrivals stay unread).
+        $fetchedIds = $messages->getCollection()->pluck('id');
+        if ($fetchedIds->isNotEmpty()) {
+            Message::whereIn('id', $fetchedIds)
+                ->where('is_read', false)
+                ->update(['is_read' => true]);
+        }
 
         return response()->json([
             'messages' => $messages->items(),
@@ -120,9 +124,25 @@ class AccountsController extends Controller
         MediaService $mediaService,
         OutboundMessageService $outbound
     ): JsonResponse {
+        // The client must actually belong to this account (assignment, owning
+        // account column, or an existing conversation on this account) and the
+        // platforms must match — otherwise any client id could be sent to
+        // through an unrelated account.
+        if ($client->platform !== $account->platform) {
+            return response()->json(['success' => false, 'error' => 'Client platform does not match this account.'], 422);
+        }
+
+        $belongsToAccount = (int) $client->assigned_account_id === (int) $account->id
+            || (isset($client->account_id) && (int) $client->account_id === (int) $account->id)
+            || Message::where('account_id', $account->id)->where('client_id', $client->id)->exists();
+
+        if (!$belongsToAccount) {
+            return response()->json(['success' => false, 'error' => 'This client does not belong to this account.'], 403);
+        }
+
         $request->validate([
             'message' => 'nullable|string|max:4096|required_without:attachment',
-            'attachment' => 'nullable|file|max:' . (MediaService::MAX_BYTES / 1024),
+            'attachment' => 'nullable|file|max:25600|mimes:jpg,jpeg,png,gif,webp,pdf,doc,docx,xls,xlsx,txt,mp4,mp3,ogg,opus,zip',
         ]);
 
         $text = (string) $request->input('message', '');

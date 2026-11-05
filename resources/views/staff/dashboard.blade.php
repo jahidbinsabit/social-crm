@@ -1827,10 +1827,9 @@
             html += `<div
                 class="contact-item${isActive}"
                 data-client-id="${c.id}"
-                data-client-name="${escHtml(name)}"
-                onclick="openChat('${accountId}',${c.id},'${escHtml(name)}')"
+                data-client-name="${escAttr(name)}"
             >
-                <div class="contact-avatar">${initial}</div>
+                <div class="contact-avatar">${escHtml(initial)}</div>
                 <div class="contact-info">
                     <div class="contact-row1">
                         <span class="contact-name">${escHtml(name)}</span>
@@ -1848,6 +1847,14 @@
         });
 
         list.innerHTML = html;
+
+        // Click handling via dataset + listener — never inline onclick with
+        // interpolated names (JS-string context cannot be HTML-escaped safely).
+        list.querySelectorAll('.contact-item').forEach(el => {
+            el.addEventListener('click', () => {
+                openChat(accountId, el.dataset.clientId, el.dataset.clientName);
+            });
+        });
     }
 
     /** Sidebar preview label: caption if present, else a media descriptor. */
@@ -1876,14 +1883,15 @@
         document.getElementById('detail-avatar').textContent = initial;
         document.getElementById('detail-name').textContent = name;
         document.getElementById('detail-sub').textContent = IS_TG ? 'Telegram User' : 'WhatsApp Contact';
-        document.getElementById('detail-identifier').innerHTML =
-            '<span style="color:var(--text-secondary);">' + (IS_TG ? 'Identifier' : 'Phone') + '</span><br>' +
-            formatIdentifier(contact.identifier);
+        const idEl = document.getElementById('detail-identifier');
+        idEl.innerHTML = '<span style="color:var(--text-secondary);">' + (IS_TG ? 'Identifier' : 'Phone') + '</span><br>';
+        idEl.appendChild(document.createTextNode(formatIdentifier(contact.identifier)));
         document.getElementById('detail-platform').innerHTML =
             '<span style="color:var(--text-secondary);">Platform</span><br>' +
             (IS_TG ? '✈ Telegram' : '💬 WhatsApp');
-        document.getElementById('detail-status').innerHTML =
-            '<span style="color:var(--text-secondary);">Status</span><br>' + (contact.status || 'active');
+        const statusEl = document.getElementById('detail-status');
+        statusEl.innerHTML = '<span style="color:var(--text-secondary);">Status</span><br>';
+        statusEl.appendChild(document.createTextNode(contact.status || 'active'));
 
         document.getElementById('contactDetailsPanel').style.display = 'block';
     };
@@ -2085,7 +2093,7 @@
             || msg._localUrl;
         if (!url) return '';
 
-        const safeUrl = escAttr(url);
+        const safeUrl = escAttr(window.safeUrl ? window.safeUrl(url) : url);
         const name = escHtml(msg.media_name || 'file');
         const nameAttr = escAttr(msg.media_name || 'file');
 
@@ -2093,7 +2101,7 @@
             case 'image':
                 return `<div class="bubble-media">
                     <img src="${safeUrl}" alt="${nameAttr}" loading="lazy"
-                         onclick="openLightbox('${safeUrl}','image','${nameAttr}')">
+                         data-lightbox-url="${safeUrl}" data-lightbox-type="image" data-lightbox-name="${nameAttr}">
                 </div>`;
 
             case 'sticker':
@@ -2293,14 +2301,22 @@
         const content = document.getElementById('lbContent');
         const dl = document.getElementById('lbDownload');
 
+        const safe = window.safeUrl ? window.safeUrl(url) : url;
         content.innerHTML = type === 'video'
-            ? `<video src="${escAttr(url)}" controls autoplay></video>`
-            : `<img src="${escAttr(url)}" alt="${escAttr(name || '')}">`;
+            ? `<video src="${escAttr(safe)}" controls autoplay></video>`
+            : `<img src="${escAttr(safe)}" alt="${escAttr(name || '')}">`;
 
-        dl.href = url;
+        dl.href = safe;
         dl.setAttribute('download', name || 'download');
         box.classList.add('open');
     };
+
+    // Lightbox triggers carry URLs in data attributes (never inline JS-string
+    // onclick) and are handled by delegation.
+    document.addEventListener('click', function(e) {
+        const t = e.target.closest('[data-lightbox-url]');
+        if (t) window.openLightbox(t.dataset.lightboxUrl, t.dataset.lightboxType || 'image', t.dataset.lightboxName || '');
+    });
 
     window.closeLightbox = function(e, force) {
         // Clicking the media itself shouldn't dismiss the viewer.
@@ -2943,6 +2959,8 @@
             .replace(/</g,'&lt;')
             .replace(/>/g,'&gt;')
             .replace(/"/g,'&quot;')
+            .replace(/'/g,'&#39;')
+            .replace(/`/g,'&#96;')
             .replace(/\n/g,'<br>');
     }
 

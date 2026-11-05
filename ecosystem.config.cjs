@@ -13,7 +13,7 @@ module.exports = {
       error_file: '/home/mrdisable/Desktop/Multi-Channel-crm/social-crm/storage/logs/laravel-web-error.log',
       out_file: '/home/mrdisable/Desktop/Multi-Channel-crm/social-crm/storage/logs/laravel-web-out.log',
       env: {
-        APP_ENV: 'local',
+        APP_ENV: 'production',
       },
     },
     {
@@ -29,7 +29,7 @@ module.exports = {
       error_file: '/home/mrdisable/Desktop/Multi-Channel-crm/social-crm/storage/logs/horizon-error.log',
       out_file: '/home/mrdisable/Desktop/Multi-Channel-crm/social-crm/storage/logs/horizon-out.log',
       env: {
-        APP_ENV: 'local',
+        APP_ENV: 'production',
         PHP_CLI_SERVER_WORKERS: '1',
       },
     },
@@ -46,7 +46,7 @@ module.exports = {
       error_file: '/home/mrdisable/Desktop/Multi-Channel-crm/social-crm/storage/logs/reverb-error.log',
       out_file: '/home/mrdisable/Desktop/Multi-Channel-crm/social-crm/storage/logs/reverb-out.log',
       env: {
-        APP_ENV: 'local',
+        APP_ENV: 'production',
       },
     },
     {
@@ -64,7 +64,7 @@ module.exports = {
       env: {
         PORT: '3001',
         LARAVEL_URL: 'http://127.0.0.1:8001',
-        INTERNAL_API_SECRET: 'bc008c9b4035ebe739d5df4d7f4888fc44189a8b857b5bca210ca539efce0500',
+        INTERNAL_API_SECRET: process.env.INTERNAL_API_SECRET, // NEVER hardcode the secret here — export INTERNAL_API_SECRET in the shell (or use a PM2 env_file outside git) before `pm2 start`; Laravel .env must hold the same value.
         NODE_ENV: 'production',
       },
     },
@@ -82,7 +82,7 @@ module.exports = {
       env: {
         PORT: '3002',
         LARAVEL_URL: 'http://127.0.0.1:8001',
-        INTERNAL_API_SECRET: 'bc008c9b4035ebe739d5df4d7f4888fc44189a8b857b5bca210ca539efce0500',
+        INTERNAL_API_SECRET: process.env.INTERNAL_API_SECRET, // NEVER hardcode the secret here — export INTERNAL_API_SECRET in the shell (or use a PM2 env_file outside git) before `pm2 start`; Laravel .env must hold the same value.
       },
     },
   ],

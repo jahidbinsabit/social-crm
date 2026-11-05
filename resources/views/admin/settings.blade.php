@@ -102,8 +102,8 @@
                     <input
                         type="password"
                         name="proxy_password"
-                        value="{{ old('proxy_password', $settings->proxy_password) }}"
-                        placeholder="Optional"
+                        value=""
+                        placeholder="{{ !empty($proxyPasswordSet ?? ($settings->proxy_password ?? null)) ? '•••••• (unchanged)' : 'Optional' }}" autocomplete="new-password"
                         style="width: 100%; padding: 10px 14px; background-color: var(--bg-primary); border: 1px solid var(--border); border-radius: 8px; color: var(--text-primary); font-size: 14px; outline: none;"
                     >
                 </div>

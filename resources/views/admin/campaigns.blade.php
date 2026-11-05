@@ -188,7 +188,7 @@
                         data.clients.forEach(client => {
                             const statusColor = client.status === 'contacted' ? 'var(--success)' : (client.status === 'failed' ? 'var(--danger)' : 'var(--text-secondary)');
                             const details = client.fail_reason ? client.fail_reason : (client.sent_at ? ('Sent at ' + new Date(client.sent_at).toLocaleTimeString()) : '-');
-                            html += '<tr style="border-top: 1px solid var(--border);"><td style="padding: 10px 16px; font-weight: 500;">' + client.identifier + '</td><td style="padding: 10px 16px; color: ' + statusColor + '; text-transform: capitalize; font-weight: 600;">' + client.status + '</td><td style="padding: 10px 16px; color: var(--text-secondary); font-size: 12px; max-width: 300px; word-break: break-word;">' + details + '</td></tr>';
+                            html += '<tr style="border-top: 1px solid var(--border);"><td style="padding: 10px 16px; font-weight: 500;">' + window.escHtml(client.identifier) + '</td><td style="padding: 10px 16px; color: ' + statusColor + '; text-transform: capitalize; font-weight: 600;">' + window.escHtml(client.status) + '</td><td style="padding: 10px 16px; color: var(--text-secondary); font-size: 12px; max-width: 300px; word-break: break-word;">' + window.escHtml(details) + '</td></tr>';
                         });
                     }
 

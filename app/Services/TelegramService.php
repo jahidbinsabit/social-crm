@@ -14,9 +14,11 @@ class TelegramService
         $this->baseUrl = config('services.tg_engine.url', env('TG_ENGINE_URL'));
     }
 
-    private function http(): PendingRequest
+    private function http(int $timeout = 60): PendingRequest
     {
-        return Http::timeout(60)->baseUrl($this->baseUrl);
+        return Http::timeout($timeout)
+            ->baseUrl($this->baseUrl)
+            ->withHeaders(['X-Internal-Secret' => (string) config('app.internal_secret')]);
     }
 
     public function requestOtp(string $accountId, string $phoneNumber): array
@@ -81,8 +83,7 @@ class TelegramService
         string $messageType,
         string $text = ''
     ): array {
-        return Http::timeout(120)
-            ->baseUrl($this->baseUrl)
+        return $this->http(120)
             ->throw()
             ->post('/message/send', compact(
                 'accountId',

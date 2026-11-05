@@ -277,7 +277,7 @@
             var attempts = 0;
             function tryInit() {
                 if (window.Echo && window.Echo.channel) {
-                    window.Echo.channel('admin-events').listen('PairingCodeReceived', function(e) {
+                    window.Echo.private('admin-events').listen('PairingCodeReceived', function(e) {
                         var codeBox = document.getElementById('pairing-code-display-' + e.accountId);
                         if (codeBox) {
                             codeBox.textContent = e.code;

@@ -254,6 +254,39 @@
             }
         }
     </style>
+    {{-- Shared JS escapers — use for EVERY value interpolated into innerHTML.
+         escHtml: HTML text context. escAttr: double-quoted attribute context.
+         escJs: single-quoted JS string context. safeUrl: URL scheme allowlist. --}}
+    <script>
+        window.escHtml = function (str) {
+            if (str === null || str === undefined) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;')
+                .replace(/`/g, '&#96;');
+        };
+        window.escAttr = window.escHtml;
+        window.escJs = function (str) {
+            if (str === null || str === undefined) return '';
+            return String(str)
+                .replace(/\\/g, '\\\\')
+                .replace(/'/g, "\\'")
+                .replace(/"/g, '\\"')
+                .replace(/\n/g, '\\n')
+                .replace(/\r/g, '\\r')
+                .replace(/</g, '\\x3c');
+        };
+        window.safeUrl = function (url) {
+            if (!url) return '';
+            var u = String(url).trim();
+            if (/^(https?:|blob:|data:image\/)/i.test(u)) return u;
+            if (u.charAt(0) === '/') return u;
+            return '';
+        };
+    </script>
 </head>
 <body>
 

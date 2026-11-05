@@ -12,6 +12,17 @@ class MediaService
     public const MAX_BYTES = 64 * 1024 * 1024;
 
     /**
+     * Extensions that may ever be stored (audit #29). Anything else —
+     * notably .html/.svg/.php — is rejected so an upload can never become
+     * a stored-XSS or executable file on the CRM origin.
+     */
+    public const ALLOWED_EXTENSIONS = [
+        'jpg', 'jpeg', 'png', 'gif', 'webp',
+        'pdf', 'doc', 'docx', 'xls', 'xlsx', 'txt',
+        'mp4', 'mp3', 'ogg', 'opus', 'zip',
+    ];
+
+    /**
      * Map a MIME type to the message_type enum used by the messages table.
      */
     public static function typeFromMime(?string $mime): string
@@ -35,7 +46,19 @@ class MediaService
     public function storeUpload(UploadedFile $file, int $accountId): array
     {
         $mime = $file->getMimeType() ?: 'application/octet-stream';
-        $extension = $file->getClientOriginalExtension() ?: $file->guessExtension() ?: 'bin';
+
+        // The stored extension comes from the sniffed MIME type, never from
+        // the client-supplied file name (#29); the name is only a fallback
+        // when the MIME is unknown, and only if it is allow-listed.
+        $extension = self::extensionFromMime($mime);
+        if ($extension === 'bin') {
+            $clientExt = strtolower($file->getClientOriginalExtension() ?: '');
+            $extension = in_array($clientExt, self::ALLOWED_EXTENSIONS, true) ? $clientExt : 'bin';
+        }
+        if (!in_array($extension, self::ALLOWED_EXTENSIONS, true)) {
+            throw new \InvalidArgumentException("Unsupported attachment type: {$mime}");
+        }
+
         $filename = Str::uuid() . '.' . $extension;
         $directory = 'media/' . $accountId . '/' . date('Y-m');
 
@@ -75,7 +98,18 @@ class MediaService
         }
 
         $mime = $mime ?: 'application/octet-stream';
-        $extension = self::extensionFromMime($mime, $name);
+
+        // Same allow-list as uploads (#29): MIME decides the extension; the
+        // engine-supplied file name is only a fallback for unknown MIMEs.
+        $extension = self::extensionFromMime($mime);
+        if ($extension === 'bin' && $name) {
+            $nameExt = strtolower(pathinfo($name, PATHINFO_EXTENSION));
+            $extension = in_array($nameExt, self::ALLOWED_EXTENSIONS, true) ? $nameExt : 'bin';
+        }
+        if (!in_array($extension, self::ALLOWED_EXTENSIONS, true)) {
+            return null;
+        }
+
         $filename = Str::uuid() . '.' . $extension;
         $path = 'media/' . $accountId . '/' . date('Y-m') . '/' . $filename;
 
@@ -102,12 +136,8 @@ class MediaService
         return base64_encode(Storage::disk('local')->get($path));
     }
 
-    private static function extensionFromMime(string $mime, ?string $name): string
+    private static function extensionFromMime(string $mime): string
     {
-        if ($name && ($ext = pathinfo($name, PATHINFO_EXTENSION))) {
-            return strtolower($ext);
-        }
-
         return match (strtolower($mime)) {
             'image/jpeg', 'image/jpg' => 'jpg',
             'image/png' => 'png',

@@ -23,6 +23,15 @@ class OutboundMessageService
      */
     public function deliver(Account $account, Client $client, string $text, ?array $stored = null): void
     {
+        // Platform consistency (#16/B-20): never hand a client of one
+        // platform to the other platform's engine — the identifier would be
+        // mangled or delivered to the wrong person entirely.
+        if ($client->platform !== $account->platform) {
+            throw new \InvalidArgumentException(
+                "Platform mismatch: client #{$client->id} is {$client->platform}, account #{$account->id} is {$account->platform}"
+            );
+        }
+
         $isWhatsApp = $account->platform === 'whatsapp';
 
         if (!$stored) {

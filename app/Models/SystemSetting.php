@@ -16,6 +16,25 @@ class SystemSetting extends Model
         'proxy_password',
     ];
 
+    /**
+     * Never serialize the proxy password into views, JSON or broadcasts.
+     *
+     * @var array<int, string>
+     */
+    protected $hidden = [
+        'proxy_password',
+    ];
+
+    protected function casts(): array
+    {
+        return [
+            // Encrypted at rest. NOTE for deploy: a plaintext value saved
+            // before this cast existed will not decrypt — re-enter the
+            // proxy password once after shipping.
+            'proxy_password' => 'encrypted',
+        ];
+    }
+
     public static function current(): self
     {
         return static::firstOrCreate(['id' => 1], [

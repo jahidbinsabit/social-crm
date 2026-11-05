@@ -12,6 +12,7 @@ class Message extends Model
         'account_id',
         'client_id',
         'staff_id',
+        'external_id',
         'sender_type',
         'message_type',
         'message_body',

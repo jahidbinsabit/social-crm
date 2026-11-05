@@ -32,7 +32,8 @@ class User extends Authenticatable
 
     public function messages(): HasMany
     {
-        return $this->hasMany(Message::class);
+        // Messages link to their author via staff_id, not user_id (#38).
+        return $this->hasMany(Message::class, 'staff_id');
     }
 
     public function campaigns(): HasMany

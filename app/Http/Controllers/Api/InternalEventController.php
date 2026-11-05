@@ -46,7 +46,17 @@ class InternalEventController extends Controller
             'media' => 'nullable|string',
             'mediaMime' => 'nullable|string|max:128',
             'mediaName' => 'nullable|string|max:255',
+            'externalId' => 'nullable|string|max:191',
+            'messageId' => 'nullable|string|max:191',
         ]);
+
+        // Engine message id for dedupe (#14). Payloads may name it
+        // externalId, messageId, or a bare id.
+        $externalId = $validated['externalId'] ?? $validated['messageId'] ?? null;
+        if (!$externalId && $request->filled('id') && is_scalar($request->input('id'))) {
+            $externalId = (string) $request->input('id');
+        }
+        $externalId = $externalId !== null && trim($externalId) !== '' ? trim($externalId) : null;
 
         $bodyText = trim($validated['body'] ?? '');
         $hasMedia = !empty($validated['media']);
@@ -63,6 +73,12 @@ class InternalEventController extends Controller
             return response()->json(['error' => 'Account not found'], 404);
         }
 
+        // Dedupe (#14): a retry of an already-stored engine message is a
+        // success, not a second copy — ack it without storing/broadcasting.
+        if ($externalId && Message::where('account_id', $account->id)->where('external_id', $externalId)->exists()) {
+            return response()->json(['ok' => true, 'duplicate' => true]);
+        }
+
         // Normalize identifiers so the same person always maps to one record.
         // - Telegram: strip leading @ from usernames
         // - WhatsApp: strip JID suffix (@s.whatsapp.net)
@@ -74,8 +90,10 @@ class InternalEventController extends Controller
             $cleanIdentifier = explode('@', $cleanIdentifier, 2)[0];
         }
 
+        $junkNames = ['client', 'contact', 'crm contact', 'user', 'unknown', 'none', 'null'];
+
         $displayName = $validated['displayName'] ?? null;
-        if ($displayName && in_array(strtolower(trim($displayName)), ['client', 'contact', 'crm contact', 'user', 'unknown', 'none', 'null'], true)) {
+        if ($displayName && in_array(strtolower(trim($displayName)), $junkNames, true)) {
             $displayName = null;
         }
 
@@ -92,26 +110,27 @@ class InternalEventController extends Controller
             $phone ? '+' . ltrim($phone, '+') : null,
         ]));
 
-        // Find all clients matching any candidate identifier
-        $clients = Client::where('platform', $platform)
+        // Find this account's OWN client matching any candidate identifier
+        // (#13). A conversation belongs to one account: the same person
+        // messaging two business numbers gets two separate client records.
+        // Another account's client is NEVER merged into — if this account
+        // has no matching client, a fresh one is created below.
+        $client = Client::where('platform', $platform)
             ->whereIn('identifier', $candidates)
-            ->get();
-
-        if ($clients->isEmpty()) {
-            $client = null;
-        } else {
-            // Prefer the client assigned to this account; otherwise take the most recent
-            $client = $clients->where('assigned_account_id', $account->id)->first();
-            if (!$client) {
-                $client = $clients->sortByDesc(function ($c) {
-                    return Message::where('client_id', $c->id)->max('created_at') ?? $c->created_at;
-                })->first();
-            }
-        }
+            ->where(function ($q) use ($account) {
+                $q->where('account_id', $account->id)
+                    ->orWhere('assigned_account_id', $account->id);
+            })
+            ->get()
+            ->sortByDesc(function ($c) {
+                return Message::where('client_id', $c->id)->max('created_at') ?? $c->created_at;
+            })
+            ->first();
 
         if (!$client) {
             $client = Client::create([
                 'campaign_id' => null,
+                'account_id' => $account->id,
                 'platform' => $platform,
                 'identifier' => $cleanIdentifier,
                 'display_name' => $displayName ?: $cleanIdentifier,
@@ -119,27 +138,36 @@ class InternalEventController extends Controller
                 'assigned_account_id' => $account->id,
             ]);
         } else {
-            // Update display name if it changed and is valid
-            if ($displayName && $client->display_name !== $displayName) {
+            // Display name (#15): an inbound push name may only fill in a
+            // name that is empty, still the raw identifier, or a known
+            // placeholder — a real stored name is never overwritten.
+            $currentName = $client->display_name;
+            $nameIsPlaceholder = !$currentName
+                || $currentName === $client->identifier
+                || in_array(strtolower(trim($currentName)), $junkNames, true);
+            if ($displayName && $nameIsPlaceholder && $currentName !== $displayName) {
                 $client->update(['display_name' => $displayName]);
-            } elseif ($client->display_name && in_array(strtolower(trim($client->display_name)), ['client', 'contact', 'crm contact', 'user', 'unknown', 'none', 'null'], true)) {
-                $client->update(['display_name' => $displayName ?: $cleanIdentifier]);
             }
-            // If client was from another account and has no assignment, link it
-            if (!$client->assigned_account_id) {
-                $client->update(['assigned_account_id' => $account->id]);
-            }
-        }
 
-        // Only auto-assign if the client has no assigned account yet.
-        if (!$client->assigned_account_id) {
-            $client->update(['assigned_account_id' => $account->id]);
+            // Backfill the #13 ownership columns for pre-migration rows of
+            // THIS account (the lookup above already scoped to it).
+            $link = [];
+            if (!$client->account_id) {
+                $link['account_id'] = $account->id;
+            }
+            if (!$client->assigned_account_id) {
+                $link['assigned_account_id'] = $account->id;
+            }
+            if ($link) {
+                $client->update($link);
+            }
         }
 
         $attributes = [
             'platform' => $platform,
             'account_id' => $account->id,
             'client_id' => $client->id,
+            'external_id' => $externalId,
             'sender_type' => 'client',
             'message_type' => $validated['messageType'] ?? 'text',
             'message_body' => $bodyText,
@@ -172,7 +200,25 @@ class InternalEventController extends Controller
             }
         }
 
-        $message = Message::create($attributes);
+        if ($externalId) {
+            // firstOrCreate on the unique (account_id, external_id): even if
+            // two retries race past the early check above, only one row and
+            // one broadcast ever happen (#14).
+            try {
+                $message = Message::firstOrCreate(
+                    ['account_id' => $account->id, 'external_id' => $externalId],
+                    $attributes
+                );
+            } catch (\Illuminate\Database\QueryException $e) {
+                return response()->json(['ok' => true, 'duplicate' => true]);
+            }
+
+            if (!$message->wasRecentlyCreated) {
+                return response()->json(['ok' => true, 'duplicate' => true]);
+            }
+        } else {
+            $message = Message::create($attributes);
+        }
 
         broadcast(new NewMessageReceived($message));
 

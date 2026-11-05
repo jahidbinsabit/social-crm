@@ -4,6 +4,10 @@
 
 # ─── Environment & Secrets ──────────────────
 .env
+.env.local
+*.session
+*.session-journal
+services/*/sessions/
 .env.backup
 .env.production
 .env.staging
